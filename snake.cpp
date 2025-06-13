@@ -27,9 +27,11 @@ int score = 0;
 time_t startTime;
 
 void buzz(int durationMs) {
-    digitalWrite(BUZZER_PIN, HIGH);
-    usleep(durationMs * 1000);
-    digitalWrite(BUZZER_PIN, LOW);
+    std::thread([](int d) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        usleep(d * 1000);
+        digitalWrite(BUZZER_PIN, LOW);
+    }, durationMs).detach();
 }
 
 void drawBlock(int x, int y, int w, int h) {
@@ -68,20 +70,22 @@ void setupButtons() {
 
 void handleButtons() {
     while (running || !running) {
-        dirMutex.lock();
-        if (digitalRead(27) == LOW && dir != 'D') dir = 'U';
-        else if (digitalRead(17) == LOW && dir != 'U') dir = 'D';
-        else if ((digitalRead(22) == LOW || digitalRead(6) == LOW) && dir != 'L') dir = 'R';
-        else if (digitalRead(23) == LOW && dir != 'R') dir = 'L';
-        if (!running && (
-            digitalRead(27) == LOW ||
-            digitalRead(17) == LOW ||
-            digitalRead(22) == LOW ||
-            digitalRead(23) == LOW ||
-            digitalRead(6) == LOW)) {
-            restartRequested = true;
-        }
-        dirMutex.unlock();
+        std::thread([&](){
+            dirMutex.lock();
+            if (digitalRead(27) == LOW && dir != 'D') dir = 'U';
+            else if (digitalRead(17) == LOW && dir != 'U') dir = 'D';
+            else if ((digitalRead(22) == LOW || digitalRead(6) == LOW) && dir != 'L') dir = 'R';
+            else if (digitalRead(23) == LOW && dir != 'R') dir = 'L';
+            if (!running && (
+                digitalRead(27) == LOW ||
+                digitalRead(17) == LOW ||
+                digitalRead(22) == LOW ||
+                digitalRead(23) == LOW ||
+                digitalRead(6) == LOW)) {
+                restartRequested = true;
+            }
+            dirMutex.unlock();
+        }).detach();
         usleep(100000);
     }
 }
@@ -131,6 +135,9 @@ void moveSnake() {
 
 void timerThread() {
     while (running) {
+        std::thread([](){
+            std::cout << "[TIMER THREAD ACTIVE]" << std::endl;
+        }).detach();
         usleep(1000000);
     }
 }
@@ -174,7 +181,7 @@ int main() {
         std::thread t3(timerThread);
 
         while (running) {
-            draw();
+            std::thread([](){ draw(); }).join();
             usleep(50000);
         }
 
