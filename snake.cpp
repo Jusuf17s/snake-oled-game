@@ -20,9 +20,10 @@ struct Point {
 std::vector<Point> snake;
 Point food;
 char dir = 'R';
-bool running = true;
 bool restartRequested = false;
 std::mutex dirMutex;
+std::mutex gameMutex;
+bool gameRunning = true;
 int score = 0;
 time_t startTime;
 
@@ -68,15 +69,26 @@ void setupButtons() {
     pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW); // Buzzer setup
 }
 
+bool isGameRunning() {
+    std::lock_guard<std::mutex> lock(gameMutex);
+    return gameRunning;
+}
+
+void setGameRunning(bool value) {
+    std::lock_guard<std::mutex> lock(gameMutex);
+    gameRunning = value;
+}
+
 void handleButtons() {
-    while (running || !running) {
-        std::thread([&](){
+    while (true) {
+        std::thread([&]() {
             dirMutex.lock();
             if (digitalRead(27) == LOW && dir != 'D') dir = 'U';
             else if (digitalRead(17) == LOW && dir != 'U') dir = 'D';
             else if ((digitalRead(22) == LOW || digitalRead(6) == LOW) && dir != 'L') dir = 'R';
             else if (digitalRead(23) == LOW && dir != 'R') dir = 'L';
-            if (!running && (
+
+            if (!isGameRunning() && (
                 digitalRead(27) == LOW ||
                 digitalRead(17) == LOW ||
                 digitalRead(22) == LOW ||
@@ -91,7 +103,7 @@ void handleButtons() {
 }
 
 void moveSnake() {
-    while (running) {
+    while (isGameRunning()) {
         dirMutex.lock();
         Point head = snake.front();
         switch (dir) {
@@ -105,7 +117,7 @@ void moveSnake() {
         if (head.x < 0 || head.x >= 128 || head.y < 0 || head.y >= 64) {
             buzz(500);
             usleep(500000);
-            running = false;
+            setGameRunning(false);
             break;
         }
 
@@ -113,7 +125,7 @@ void moveSnake() {
             if (head.x == p.x && head.y == p.y) {
                 buzz(500);
                 usleep(500000);
-                running = false;
+                setGameRunning(false);
                 return;
             }
         }
@@ -130,15 +142,6 @@ void moveSnake() {
         }
 
         usleep(400000);
-    }
-}
-
-void timerThread() {
-    while (running) {
-        std::thread([](){
-            std::cout << "[TIMER THREAD ACTIVE]" << std::endl;
-        }).detach();
-        usleep(1000000);
     }
 }
 
@@ -160,7 +163,7 @@ void resetGame() {
     food.x = (rand() % 30) * 4;
     food.y = (rand() % 16) * 4;
     dir = 'R';
-    running = true;
+    setGameRunning(true);
     score = 0;
     startTime = time(NULL);
 }
@@ -169,7 +172,9 @@ int main() {
     srand(time(0));
     display.begin();
     setupButtons();
-    buzz(300);  // 🔊 Buzzer test on startup
+    buzz(300);
+
+    std::thread tButtons(handleButtons); // run only once
 
     do {
         splashScreen();
@@ -177,29 +182,29 @@ int main() {
         restartRequested = false;
 
         std::thread t1(moveSnake);
-        std::thread t2(handleButtons);
-        std::thread t3(timerThread);
 
-        while (running) {
-            std::thread([](){ draw(); }).join();
+        while (isGameRunning()) {
+            std::thread([]() { draw(); }).join();
             usleep(50000);
         }
 
         t1.join();
-        t2.detach();
-        t3.join();
 
-        display.clear();
-        std::string finalScore = "SCORE: " + std::to_string(score);
-        display.drawText(10, 20, "GAME OVER");
-        display.drawText(10, 35, finalScore.c_str());
-        display.drawText(10, 50, "PRESS RESTART");
-        display.sendBuffer();
+        for (int i = 0; i < 10; ++i) {
+            display.clear();
+            std::string finalScore = "SCORE: " + std::to_string(score);
+            display.drawText(10, 20, "GAME OVER");
+            display.drawText(10, 35, finalScore.c_str());
+            display.drawText(10, 50, "PRESS RESTART");
+            display.sendBuffer();
+            usleep(50000);
+        }
 
         while (!restartRequested) {
             usleep(100000);
         }
     } while (true);
 
+    tButtons.detach(); // optional
     return 0;
 }
